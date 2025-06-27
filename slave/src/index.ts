@@ -29,14 +29,38 @@ async function runSlave() {
 
   ws.on("message", async (data) => {
     const msg: TransportMessage = JSON.parse(data.toString());
+    const currentPosition = await song.get("current_song_time");
+    const isPlaying = await song.get("is_playing");
 
-    await song.set("is_playing", true);
-    console.log(`[Slave] Aktualizacja stanu odtwarzania na ${msg.isPlaying}`);
+    const positionDiff = Math.abs(currentPosition - msg.position);
+    const shouldUpdatePosition = positionDiff > 0.2;
 
-    await song.set("current_song_time", msg.position);
-    console.log(`[Slave] Dostosowano pozycje ${msg.position}`);
+    console.log(
+      `[Slave] Otrzymano: playing=${msg.isPlaying}, position=${msg.position}, tempo=${msg.tempo}`
+    );
+    console.log(
+      `[Slave] Aktualna pozycja: ${currentPosition}, różnica: ${positionDiff}`
+    );
+
+    if (shouldUpdatePosition) {
+      await song.set("current_song_time", msg.position);
+      console.log(`[Slave] Ustawiono pozycję na ${msg.position}`);
+    }
+
+    if (msg.isPlaying) {
+      if (!isPlaying) {
+        await song.set("is_playing", true);
+        console.log(`[Slave] Włączono odtwarzanie`);
+      }
+    } else {
+      if (isPlaying) {
+        await song.set("is_playing", false);
+        console.log(`[Slave] Zatrzymano odtwarzanie`);
+      }
+    }
+
     await song.set("tempo", msg.tempo);
-    console.log(`[Slave] Adjusted tempo to ${msg.tempo}`);
+    console.log(`[Slave] Dostosowano tempo ${msg.tempo}`);
   });
 }
 

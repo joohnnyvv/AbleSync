@@ -56,13 +56,15 @@ async function runMaster() {
     broadcast(message);
   });
 
-  setInterval(async () => {
+  song.addListener("current_song_time", async (position: number) => {
     const isPlaying = await song.get("is_playing");
-    const position = await song.get("current_song_time");
     const tempo = await song.get("tempo");
     const message: TransportMessage = { isPlaying, position, tempo };
+    console.log(
+      `[Master] Stan "is_playing" sie zmienil: ${JSON.stringify(message)}`
+    );
     broadcast(message);
-  }, 1000);
+  });
 }
 
 runMaster().catch(console.error);
