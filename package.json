@@ -1,14 +1,63 @@
 {
   "name": "ablesync",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "main.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "rm -rf dist && tsc && electron-builder --arm64 --publish never",
+    "build:universal": "rm -rf dist && tsc && electron-builder --universal --publish never",
+    "clean": "rm -rf dist release node_modules",
+    "rebuild": "npm run clean && npm install && npm run build",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "build": {
+    "appId": "com.joohnnyvv.ablesync",
+    "productName": "AbleSync",
+    "mac": {
+      "category": "public.app-category.music",
+      "target": "dmg",
+      "icon": "build/icon.icns",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "files": [
+      "dist/**/*",
+      "main.js",
+      "preload.js",
+      "index.html",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/slave/src",
+        "to": "app/slave"
+      },
+      {
+        "from": "dist/master/src",
+        "to": "app/master"
+      },
+      {
+        "from": "assets",
+        "to": "assets"
+      },
+      {
+        "from": "node_modules",
+        "to": "app/node_modules"
+      }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/app/**/*.js",
+      "**/app/**/*.json",
+      "**/node_modules/**/*"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    }
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "Server for connecting two Ableton Live instances",
   "dependencies": {
     "ableton-js": "^3.7.0",
     "dotenv": "^16.6.0",
@@ -17,6 +66,8 @@
   "devDependencies": {
     "@types/node": "^24.0.4",
     "@types/ws": "^8.18.1",
+    "electron": "^37.1.0",
+    "electron-builder": "^26.0.12",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
   }
