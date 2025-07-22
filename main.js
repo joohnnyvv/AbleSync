@@ -1,4 +1,4 @@
-const { app, Tray, Menu, BrowserWindow, ipcMain } = require("electron");
+const { app, Tray, Menu, BrowserWindow, ipcMain, dialog } = require("electron");
 const path = require("path");
 const { spawn } = require("child_process");
 const fs = require("fs");
@@ -24,6 +24,8 @@ function createWindow() {
       sandbox: true,
       webSecurity: true,
     },
+    icon: path.join(__dirname, "assets", "iconTemplate.png"),
+    title: "AbleSync",
   });
 
   // Poprawne ładowanie pliku HTML
@@ -161,15 +163,27 @@ function startServer(mode) {
     const message = data.toString();
     if (window) window.webContents.send("log", message);
 
-    // Send specific status updates
+    // Updated status detection for UDP
     if (/Live connected/.test(message)) {
       window.webContents.send("ableton-status", true);
     } else if (/Got connection!/.test(message)) {
       window.webContents.send("ableton-status", true);
-    } else if (/Polaczono z serwerem/.test(message)) {
+    } else if (/UDP Multicast uruchomiony/.test(message)) {
+      // Master UDP server started
       window.webContents.send("websocket-status", true);
-    } else if (/Serwer zatrzymany/.test(message)) {
+    } else if (/Nasłuchiwanie UDP Multicast/.test(message)) {
+      // Slave UDP client started listening
+      window.webContents.send("websocket-status", true);
+    } else if (/Połączono z masterem/.test(message)) {
+      // Slave connected to master
+      window.webContents.send("websocket-status", true);
+    } else if (
+      /Serwer zatrzymany/.test(message) ||
+      /Zamykanie.*UDP/.test(message)
+    ) {
       window.webContents.send("ableton-status", false);
+      window.webContents.send("websocket-status", false);
+    } else if (/Utracono połączenie z masterem/.test(message)) {
       window.webContents.send("websocket-status", false);
     }
   });
@@ -183,7 +197,7 @@ function startServer(mode) {
     connectionStatus = "disconnected";
     processRef = null;
     updateTrayTooltip();
-    if (window) window.webContents.send("log", "Serwer zatrzymany.");
+    if (window) window.webContents.send("log", "Serwer zatrzymany.\n");
   });
 }
 
@@ -194,34 +208,43 @@ function stopServer() {
   }
 }
 
-ipcMain.on("start-slave", (_, ip) => {
+ipcMain.on("save-logs", async (event, logContent) => {
+  try {
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: "Zapisz logi",
+      defaultPath: "logi.txt",
+      filters: [{ name: "Pliki tekstowe", extensions: ["txt"] }],
+    });
+
+    if (!canceled && filePath) {
+      try {
+        fs.writeFileSync(filePath, logContent);
+        console.log("Logi zapisane do:", filePath);
+      } catch (writeErr) {
+        console.error("Błąd zapisu pliku:", writeErr);
+      }
+    }
+  } catch (err) {
+    console.error("Błąd podczas zapisu logów:", err);
+  }
+});
+
+// Updated slave startup - no longer needs IP input since multicast is used
+ipcMain.on("start-slave", () => {
   if (processRef) {
     stopServer();
   }
-
-  // Validate IP format
-  if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
-    if (window)
-      window.webContents.send("log", `[ERR] Nieprawidłowy format IP: ${ip}\n`);
-    return;
-  }
-
-  // Debug logging
-  console.log("App is packaged:", app.isPackaged);
-  console.log("process.resourcesPath:", process.resourcesPath);
-  console.log("__dirname:", __dirname);
 
   const scriptPath = getScriptPath("slave");
 
   console.log("Starting slave from:", scriptPath);
   console.log("Script exists:", fs.existsSync(scriptPath));
 
-  // Send debug info to UI
+  // Send info to UI
   if (window) {
-    window.webContents.send("log", `[DEBUG] Trying path: ${scriptPath}\n`);
     window.webContents.send(
       "log",
-      `[DEBUG] File exists: ${fs.existsSync(scriptPath)}\n`
+      `[INFO] Uruchamianie slave z UDP Multicast...\n`
     );
   }
 
@@ -231,7 +254,6 @@ ipcMain.on("start-slave", (_, ip) => {
   processRef = spawn(electronPath, [scriptPath], {
     env: {
       ...process.env,
-      MASTER_WS_IP: ip,
       ELECTRON_RUN_AS_NODE: "1",
     },
     cwd: app.isPackaged
@@ -251,14 +273,18 @@ ipcMain.on("start-slave", (_, ip) => {
     console.error(`[Slave ERR] ${message}`);
 
     if (window) {
-      if (message.includes("ECONNREFUSED")) {
+      // UDP-specific error handling
+      if (message.includes("EADDRINUSE")) {
         window.webContents.send(
           "log",
-          `[ERR] Nie można połączyć z masterem (${ip}:8080)\n` +
-            `Sprawdź czy:\n` +
-            `1. Master jest uruchomiony\n` +
-            `2. Adres IP jest prawidłowy\n` +
-            `3. Zapora sieciowa nie blokuje portu 8080\n`
+          `[ERR] Port 8080 jest już używany\n` +
+            `Sprawdź czy nie działa już inny slave lub master\n`
+        );
+      } else if (message.includes("EACCES")) {
+        window.webContents.send(
+          "log",
+          `[ERR] Brak uprawnień do UDP Multicast\n` +
+            `Spróbuj uruchomić aplikację jako administrator\n`
         );
       } else {
         window.webContents.send("log", `[ERR] ${message}`);

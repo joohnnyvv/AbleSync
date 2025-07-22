@@ -1,53 +1,15 @@
 import { Ableton } from "ableton-js";
-import WebSocket from "ws";
+import * as dgram from "dgram";
 
-const MASTER_IP = process.env.MASTER_WS_IP;
-if (!MASTER_IP) {
-  console.error("Brakuje zmiennej środowiskowej MASTER_WS_IP");
-  process.exit(1);
-}
-
-const MASTER_WS_URL = `ws://${MASTER_IP}:8080`;
+const MULTICAST_GROUP = "224.0.1.100";
+const MULTICAST_PORT = 8080;
+const SYNC_TIMEOUT = 5000; // 5 seconds timeout for sync messages
 
 interface TransportMessage {
   isPlaying: boolean;
   position: number;
   tempo: number;
-}
-
-async function connectToMaster() {
-  const MAX_RETRIES = 5;
-  const RETRY_DELAY = 3000;
-
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const ws = new WebSocket(MASTER_WS_URL);
-
-      await new Promise((resolve, reject) => {
-        ws.on("open", resolve);
-        ws.on("error", reject);
-
-        setTimeout(() => {
-          reject(new Error("Connection timeout"));
-        }, 5000);
-      });
-
-      console.log(`[Slave] Połączono z masterem (${MASTER_WS_URL})`);
-      return ws;
-    } catch (err: any) {
-      console.error(
-        `[Slave] Błąd połączenia (próba ${attempt}/${MAX_RETRIES}):`,
-        err.message
-      );
-      if (attempt < MAX_RETRIES) {
-        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
-      }
-    }
-  }
-
-  throw new Error(
-    `Nie udało się połączyć z masterem po ${MAX_RETRIES} próbach`
-  );
+  timestamp: number;
 }
 
 async function runSlave() {
@@ -55,46 +17,120 @@ async function runSlave() {
   await ableton.start();
   const song = ableton.song;
 
-  const ws = await connectToMaster();
+  // Create UDP socket for multicast
+  const socket = dgram.createSocket({ type: "udp4", reuseAddr: true });
 
-  ws.on("open", () => {
-    console.log(`[Slave] Polaczono z serwerem ${MASTER_WS_URL}`);
+  let lastSyncTime = Date.now();
+  let isConnected = false;
+
+  socket.bind(MULTICAST_PORT, () => {
+    socket.addMembership(MULTICAST_GROUP);
+    console.log(
+      `[Slave] Nasłuchiwanie UDP Multicast na ${MULTICAST_GROUP}:${MULTICAST_PORT}`
+    );
   });
 
-  ws.on("message", async (data) => {
-    const msg: TransportMessage = JSON.parse(data.toString());
-    const currentPosition = await song.get("current_song_time");
-    const isPlaying = await song.get("is_playing");
+  socket.on("message", async (buffer, rinfo) => {
+    try {
+      const msg: TransportMessage = JSON.parse(buffer.toString());
+      lastSyncTime = Date.now();
 
-    const positionDiff = Math.abs(currentPosition - msg.position);
-    const shouldUpdatePosition = positionDiff > 0.2;
-
-    console.log(
-      `[Slave] Otrzymano: playing=${msg.isPlaying}, position=${msg.position}, tempo=${msg.tempo}`
-    );
-    console.log(
-      `[Slave] Aktualna pozycja: ${currentPosition}, różnica: ${positionDiff}`
-    );
-
-    if (shouldUpdatePosition) {
-      await song.set("current_song_time", msg.position);
-      console.log(`[Slave] Ustawiono pozycję na ${msg.position}`);
-    }
-
-    if (msg.isPlaying) {
-      if (!isPlaying) {
-        await song.set("is_playing", true);
-        console.log(`[Slave] Włączono odtwarzanie`);
+      if (!isConnected) {
+        console.log(
+          `[Slave] Połączono z masterem (${rinfo.address}:${rinfo.port})`
+        );
+        isConnected = true;
       }
-    } else {
-      if (isPlaying) {
-        await song.set("is_playing", false);
-        console.log(`[Slave] Zatrzymano odtwarzanie`);
-      }
-    }
 
-    await song.set("tempo", msg.tempo);
-    console.log(`[Slave] Dostosowano tempo ${msg.tempo}`);
+      const currentPosition = await song.get("current_song_time");
+      const isPlaying = await song.get("is_playing");
+      const currentTempo = await song.get("tempo");
+
+      // Calculate message age to compensate for network delay
+      const messageAge = (Date.now() - msg.timestamp) / 1000;
+      let adjustedPosition = msg.position;
+
+      // If master is playing, adjust position for network delay
+      if (msg.isPlaying) {
+        adjustedPosition += messageAge;
+      }
+
+      const positionDiff = Math.abs(currentPosition - adjustedPosition);
+      const shouldUpdatePosition = positionDiff > 0.1; // Reduced threshold for tighter sync
+      const tempoDiff = Math.abs(currentTempo - msg.tempo);
+
+      console.log(
+        `[Slave] Otrzymano: playing=${msg.isPlaying}, position=${
+          msg.position
+        }→${adjustedPosition.toFixed(3)}, tempo=${msg.tempo}, delay=${(
+          messageAge * 1000
+        ).toFixed(1)}ms`
+      );
+
+      if (positionDiff > 0.05) {
+        // Only log significant position differences
+        console.log(
+          `[Slave] Pozycja: aktualna=${currentPosition.toFixed(
+            3
+          )}, różnica=${positionDiff.toFixed(3)}`
+        );
+      }
+
+      // Update position if needed
+      if (shouldUpdatePosition) {
+        await song.set("current_song_time", adjustedPosition);
+        console.log(
+          `[Slave] Ustawiono pozycję na ${adjustedPosition.toFixed(3)}`
+        );
+      }
+
+      // Update playback state
+      if (msg.isPlaying !== isPlaying) {
+        await song.set("is_playing", msg.isPlaying);
+        console.log(
+          `[Slave] ${msg.isPlaying ? "Włączono" : "Zatrzymano"} odtwarzanie`
+        );
+      }
+
+      // Update tempo if needed
+      if (tempoDiff > 0.01) {
+        await song.set("tempo", msg.tempo);
+        console.log(`[Slave] Dostosowano tempo do ${msg.tempo}`);
+      }
+    } catch (error) {
+      console.error("[Slave] Błąd przetwarzania wiadomości UDP:", error);
+    }
+  });
+
+  socket.on("error", (err) => {
+    console.error("[Slave] Błąd UDP socket:", err);
+  });
+
+  // Monitor connection status
+  setInterval(() => {
+    const timeSinceLastSync = Date.now() - lastSyncTime;
+
+    if (isConnected && timeSinceLastSync > SYNC_TIMEOUT) {
+      console.log("[Slave] Utracono połączenie z masterem");
+      isConnected = false;
+    }
+  }, 1000);
+
+  // Cleanup on exit
+  process.on("SIGINT", () => {
+    console.log("[Slave] Zamykanie klienta UDP...");
+    socket.dropMembership(MULTICAST_GROUP);
+    socket.close(() => {
+      process.exit(0);
+    });
+  });
+
+  process.on("SIGTERM", () => {
+    console.log("[Slave] Zamykanie klienta UDP...");
+    socket.dropMembership(MULTICAST_GROUP);
+    socket.close(() => {
+      process.exit(0);
+    });
   });
 }
 
