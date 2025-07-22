@@ -8,7 +8,7 @@ interface TransportMessage {
   isPlaying: boolean;
   position: number;
   tempo: number;
-  timestamp: number; // Add timestamp for better sync
+  timestamp: number;
 }
 
 async function runMaster() {
@@ -16,7 +16,6 @@ async function runMaster() {
   await ableton.start();
   const song = ableton.song;
 
-  // Create UDP socket for multicast
   const socket = dgram.createSocket({ type: "udp4", reuseAddr: true });
 
   socket.bind(() => {
@@ -30,11 +29,10 @@ async function runMaster() {
   let prevData: Omit<TransportMessage, "timestamp"> | null = null;
 
   const broadcast = (data: Omit<TransportMessage, "timestamp">) => {
-    // Skip if data hasn't changed (except for periodic position updates)
     if (
       prevData &&
       prevData.isPlaying === data.isPlaying &&
-      Math.abs(prevData.position - data.position) < 0.01 && // Allow small position changes
+      Math.abs(prevData.position - data.position) < 0.001 &&
       prevData.tempo === data.tempo
     ) {
       return;
@@ -46,8 +44,11 @@ async function runMaster() {
       timestamp: Date.now(),
     };
 
+    if (data.isPlaying) {
+      console.log(`[Master] Wysyła wiadomość UDP: ${JSON.stringify(message)}`);
+    }
+
     const payload = JSON.stringify(message);
-    console.log("[BROADCAST] Wysylam wiadomosc UDP Multicast:", payload);
 
     socket.send(payload, MULTICAST_PORT, MULTICAST_GROUP, (err) => {
       if (err) {
@@ -56,7 +57,6 @@ async function runMaster() {
     });
   };
 
-  // Listen for transport changes
   song.addListener("is_playing", async (isPlaying: boolean) => {
     const position = await song.get("current_song_time");
     const tempo = await song.get("tempo");
@@ -72,31 +72,9 @@ async function runMaster() {
     const tempo = await song.get("tempo");
     const message = { isPlaying, position, tempo };
 
-    // Only log position changes if significant or playback state changed
-    if (
-      !prevData ||
-      prevData.isPlaying !== isPlaying ||
-      Math.abs(prevData.position - position) > 1
-    ) {
-      console.log(`[Master] Pozycja się zmieniła: ${JSON.stringify(message)}`);
-    }
     broadcast(message);
   });
 
-  // Send periodic sync messages to ensure slaves stay in sync
-  setInterval(async () => {
-    try {
-      const isPlaying = await song.get("is_playing");
-      const position = await song.get("current_song_time");
-      const tempo = await song.get("tempo");
-
-      broadcast({ isPlaying, position, tempo });
-    } catch (error) {
-      console.error("[Master] Błąd podczas okresowej synchronizacji:", error);
-    }
-  }, 1000); // Send sync every second
-
-  // Cleanup on exit
   process.on("SIGINT", () => {
     console.log("[Master] Zamykanie serwera UDP...");
     socket.close(() => {
@@ -112,4 +90,4 @@ async function runMaster() {
   });
 }
 
-runMaster().catch(console.error);
+runMaster().catch();

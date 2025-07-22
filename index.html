@@ -18,6 +18,7 @@
         flex-direction: column;
         gap: 0;
         overflow-y: hidden;
+        height: 100vh;
       }
       #controls {
         display: flex;
@@ -37,8 +38,9 @@
       pre {
         margin: 0;
         white-space: pre-wrap;
-        max-height: 90vh;
+        max-height: calc(100vh - 120px);
         overflow-y: auto;
+        flex-grow: 1;
       }
       .status-indicator {
         width: 10px;
@@ -56,12 +58,24 @@
       }
 
       .info-text {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
         font-size: 12px;
         color: #aaa;
         text-align: center;
-        padding: 5px;
+        padding: 5px 10px;
         background: #2c2c2c;
         border-top: 1px solid #444;
+      }
+
+      .version-info {
+        font-size: 10px;
+        color: #666;
+        text-align: center;
+        padding: 3px;
+        background: #252525;
+        border-top: 1px solid #333;
       }
     </style>
   </head>
@@ -73,19 +87,32 @@
         <button onclick="stop()">Zatrzymaj serwer</button>
         <button onclick="saveLogs()">Zapisz logi do pliku</button>
         <button onclick="clearLogs()">Wyczyść logi</button>
-        <div id="statusIndicator" class="status-indicator disconnected"></div>
       </div>
       <div class="info-text">
         UDP Multicast (224.0.1.100:8080) - Nie wymaga konfiguracji IP
+        <div id="statusIndicator" class="status-indicator disconnected"></div>
       </div>
       <pre id="logOutput">Logi aplikacji pojawią się tutaj...</pre>
+      <div id="versionInfo" class="version-info">Wersja: ładowanie...</div>
+      <p id="update-info" style="color: orange; font-weight: bold"></p>
     </div>
     <script>
       const output = document.getElementById("logOutput");
       const statusIndicator = document.getElementById("statusIndicator");
+      const versionInfo = document.getElementById("versionInfo");
 
       let abletonConnected = false;
       let udpConnected = false;
+
+      window.electronAPI
+        .getAppVersion()
+        .then((version) => {
+          versionInfo.textContent = `AbleSync v${version}`;
+        })
+        .catch((err) => {
+          versionInfo.textContent = "Wersja: błąd";
+          console.error("Błąd pobierania wersji:", err);
+        });
 
       function updateStatusIndicator() {
         if (abletonConnected && udpConnected) {
@@ -120,6 +147,15 @@
 
       window.electronAPI.onLog((msg) => {
         output.textContent += msg;
+
+        let lines = output.textContent.split("\n");
+
+        if (lines.length > 50) {
+          lines = lines.slice(lines.length - 50);
+        }
+
+        output.textContent = lines.join("\n");
+
         output.scrollTop = output.scrollHeight;
 
         if (msg.includes("Live connected") || msg.includes("Got connection!")) {

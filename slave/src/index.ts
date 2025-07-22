@@ -3,7 +3,8 @@ import * as dgram from "dgram";
 
 const MULTICAST_GROUP = "224.0.1.100";
 const MULTICAST_PORT = 8080;
-const SYNC_TIMEOUT = 5000; // 5 seconds timeout for sync messages
+const SYNC_TIMEOUT = 5000;
+const TEMPO_THRESHOLD = 0.3;
 
 interface TransportMessage {
   isPlaying: boolean;
@@ -17,7 +18,6 @@ async function runSlave() {
   await ableton.start();
   const song = ableton.song;
 
-  // Create UDP socket for multicast
   const socket = dgram.createSocket({ type: "udp4", reuseAddr: true });
 
   let lastSyncTime = Date.now();
@@ -46,67 +46,51 @@ async function runSlave() {
       const isPlaying = await song.get("is_playing");
       const currentTempo = await song.get("tempo");
 
-      // Calculate message age to compensate for network delay
-      const messageAge = (Date.now() - msg.timestamp) / 1000;
-      let adjustedPosition = msg.position;
-
-      // If master is playing, adjust position for network delay
-      if (msg.isPlaying) {
-        adjustedPosition += messageAge;
-      }
-
-      const positionDiff = Math.abs(currentPosition - adjustedPosition);
-      const shouldUpdatePosition = positionDiff > 0.1; // Reduced threshold for tighter sync
-      const tempoDiff = Math.abs(currentTempo - msg.tempo);
-
-      console.log(
-        `[Slave] Otrzymano: playing=${msg.isPlaying}, position=${
-          msg.position
-        }→${adjustedPosition.toFixed(3)}, tempo=${msg.tempo}, delay=${(
-          messageAge * 1000
-        ).toFixed(1)}ms`
-      );
-
-      if (positionDiff > 0.05) {
-        // Only log significant position differences
-        console.log(
-          `[Slave] Pozycja: aktualna=${currentPosition.toFixed(
-            3
-          )}, różnica=${positionDiff.toFixed(3)}`
-        );
-      }
-
-      // Update position if needed
-      if (shouldUpdatePosition) {
-        await song.set("current_song_time", adjustedPosition);
-        console.log(
-          `[Slave] Ustawiono pozycję na ${adjustedPosition.toFixed(3)}`
-        );
-      }
-
-      // Update playback state
-      if (msg.isPlaying !== isPlaying) {
-        await song.set("is_playing", msg.isPlaying);
-        console.log(
-          `[Slave] ${msg.isPlaying ? "Włączono" : "Zatrzymano"} odtwarzanie`
-        );
-      }
-
-      // Update tempo if needed
-      if (tempoDiff > 0.01) {
+      if (Math.abs(currentTempo - msg.tempo) > TEMPO_THRESHOLD) {
         await song.set("tempo", msg.tempo);
-        console.log(`[Slave] Dostosowano tempo do ${msg.tempo}`);
+      }
+
+      if (isPlaying !== msg.isPlaying) {
+        await song.set("is_playing", msg.isPlaying);
+      }
+
+      if (!msg.isPlaying || (msg.isPlaying && !isPlaying)) {
+        await song.set("current_song_time", msg.position);
+      } else if (msg.isPlaying) {
+        console.log("Odebrany timestamp:", msg.timestamp);
+        console.log("Aktualny timestamp:", Date.now());
+
+        const networkLatency = (Date.now() - msg.timestamp) / 2;
+
+        const masterPosition =
+          msg.position + (networkLatency / 60000) * msg.tempo;
+
+        console.log("Skorygowana pozycja Mastera:", masterPosition);
+        console.log("Pozycja Slava:", currentPosition);
+
+        const positionDiff = masterPosition - currentPosition;
+
+        console.log("Rożnica pozycji:", positionDiff);
+
+        if (Math.abs(positionDiff) > 0.01) {
+          if (positionDiff > 0) {
+            await song.set("nudge_down", false);
+            await song.set("nudge_up", true);
+          } else if (positionDiff < 0) {
+            await song.set("nudge_up", false);
+            await song.set("nudge_down", true);
+          }
+        }
       }
     } catch (error) {
-      console.error("[Slave] Błąd przetwarzania wiadomości UDP:", error);
+      // console.error("[Slave] Błąd przetwarzania wiadomości UDP:", error);
     }
   });
 
   socket.on("error", (err) => {
-    console.error("[Slave] Błąd UDP socket:", err);
+    // console.error("[Slave] Błąd UDP socket:", err);
   });
 
-  // Monitor connection status
   setInterval(() => {
     const timeSinceLastSync = Date.now() - lastSyncTime;
 
@@ -116,7 +100,6 @@ async function runSlave() {
     }
   }, 1000);
 
-  // Cleanup on exit
   process.on("SIGINT", () => {
     console.log("[Slave] Zamykanie klienta UDP...");
     socket.dropMembership(MULTICAST_GROUP);
@@ -134,4 +117,4 @@ async function runSlave() {
   });
 }
 
-runSlave().catch(console.error);
+runSlave();

@@ -8,6 +8,10 @@ let window = null;
 let processRef = null;
 let connectionStatus = "disconnected";
 
+ipcMain.handle("get-app-version", () => {
+  return app.getVersion();
+});
+
 function createWindow() {
   if (window && !window.isDestroyed()) {
     window.focus();
