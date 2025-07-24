@@ -8,8 +8,59 @@ let window = null;
 let processRef = null;
 let connectionStatus = "disconnected";
 
+const userDataPath = app.getPath("userData");
+const thresholdFilePath = path.join(userDataPath, "threshold.json");
+
+const DEFAULT_THRESHOLD = 0.01;
+
+function loadThreshold() {
+  try {
+    if (fs.existsSync(thresholdFilePath)) {
+      const data = fs.readFileSync(thresholdFilePath, "utf8");
+      const config = JSON.parse(data);
+      return config.threshold || DEFAULT_THRESHOLD;
+    }
+  } catch (error) {
+    console.error("Error loading threshold:", error);
+  }
+  return DEFAULT_THRESHOLD;
+}
+
+function saveThreshold(threshold) {
+  try {
+    const config = { threshold };
+    fs.writeFileSync(thresholdFilePath, JSON.stringify(config, null, 2));
+    return true;
+  } catch (error) {
+    console.error("Error saving threshold:", error);
+    return false;
+  }
+}
+
 ipcMain.handle("get-app-version", () => {
   return app.getVersion();
+});
+
+ipcMain.handle("get-threshold", () => {
+  return loadThreshold();
+});
+
+ipcMain.on("save-threshold", (event, threshold) => {
+  const success = saveThreshold(threshold);
+  if (!success) {
+    console.error("Failed to save threshold:", threshold);
+  }
+});
+
+ipcMain.on("update-threshold", (event, threshold) => {
+  if (processRef && processRef.pid) {
+    const message = JSON.stringify({ type: "threshold", value: threshold });
+    try {
+      processRef.stdin.write(message + "\n");
+    } catch (error) {
+      console.error("Error sending threshold to slave:", error);
+    }
+  }
 });
 
 function createWindow() {
@@ -19,8 +70,8 @@ function createWindow() {
   }
 
   window = new BrowserWindow({
-    width: 500,
-    height: 400,
+    width: 800,
+    height: 600,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       nodeIntegration: false,
@@ -32,14 +83,12 @@ function createWindow() {
     title: "AbleSync",
   });
 
-  // Poprawne ładowanie pliku HTML
   if (app.isPackaged) {
     window.loadFile(path.join(__dirname, "index.html"));
   } else {
     window.loadFile("index.html");
   }
 
-  // Handle window close
   window.on("close", (event) => {
     if (!app.isQuitting) {
       event.preventDefault();
@@ -48,7 +97,7 @@ function createWindow() {
   });
 
   window.on("closed", () => {
-    window = null; // Clear the reference
+    window = null;
   });
 
   window.on("ready-to-show", () => {
@@ -73,7 +122,6 @@ function createTray() {
   tray.setToolTip("AbleSync");
   tray.setContextMenu(contextMenu);
 
-  // Handle tray click
   tray.on("click", () => {
     if (!window || window.isDestroyed()) {
       createWindow();
@@ -85,7 +133,6 @@ function createTray() {
 
 function getScriptPath(mode) {
   if (app.isPackaged) {
-    // Try app.asar.unpacked first (if asarUnpack is configured)
     const unpackedPath = path.join(
       process.resourcesPath,
       "app.asar.unpacked",
@@ -95,7 +142,6 @@ function getScriptPath(mode) {
       "index.js"
     );
 
-    // Fallback to app directory (current situation)
     const appPath = path.join(
       process.resourcesPath,
       "app",
@@ -114,7 +160,6 @@ function getScriptPath(mode) {
       `Checking app path: ${appPath} - exists: ${fs.existsSync(appPath)}`
     );
 
-    // Check which one exists
     if (fs.existsSync(unpackedPath)) {
       console.log("Using unpacked path");
       return unpackedPath;
@@ -123,7 +168,6 @@ function getScriptPath(mode) {
       return appPath;
     } else {
       console.error(`Neither path exists: ${unpackedPath} or ${appPath}`);
-      // Let's also try some other possible locations
       const alternativePaths = [
         path.join(process.resourcesPath, "dist", mode, "src", "index.js"),
         path.join(__dirname, "dist", mode, "src", "index.js"),
@@ -139,7 +183,7 @@ function getScriptPath(mode) {
         }
       }
 
-      return appPath; // Return something, will fail gracefully later
+      return appPath;
     }
   } else {
     return path.join(__dirname, "dist", mode, "src", "index.js");
@@ -167,19 +211,15 @@ function startServer(mode) {
     const message = data.toString();
     if (window) window.webContents.send("log", message);
 
-    // Updated status detection for UDP
     if (/Live connected/.test(message)) {
       window.webContents.send("ableton-status", true);
     } else if (/Got connection!/.test(message)) {
       window.webContents.send("ableton-status", true);
     } else if (/UDP Multicast uruchomiony/.test(message)) {
-      // Master UDP server started
       window.webContents.send("websocket-status", true);
     } else if (/Nasłuchiwanie UDP Multicast/.test(message)) {
-      // Slave UDP client started listening
       window.webContents.send("websocket-status", true);
     } else if (/Połączono z masterem/.test(message)) {
-      // Slave connected to master
       window.webContents.send("websocket-status", true);
     } else if (
       /Serwer zatrzymany/.test(message) ||
@@ -233,7 +273,6 @@ ipcMain.on("save-logs", async (event, logContent) => {
   }
 });
 
-// Updated slave startup - no longer needs IP input since multicast is used
 ipcMain.on("start-slave", () => {
   if (processRef) {
     stopServer();
@@ -244,7 +283,6 @@ ipcMain.on("start-slave", () => {
   console.log("Starting slave from:", scriptPath);
   console.log("Script exists:", fs.existsSync(scriptPath));
 
-  // Send info to UI
   if (window) {
     window.webContents.send(
       "log",
@@ -252,20 +290,21 @@ ipcMain.on("start-slave", () => {
     );
   }
 
-  // Use Electron's Node.js runtime
   const electronPath = process.execPath;
+
+  const currentThreshold = loadThreshold();
 
   processRef = spawn(electronPath, [scriptPath], {
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: "1",
+      SYNC_THRESHOLD: currentThreshold.toString(),
     },
     cwd: app.isPackaged
       ? path.join(process.resourcesPath, "app")
       : path.join(__dirname, ".."),
   });
 
-  // Add process event handlers
   processRef.stdout.on("data", (data) => {
     const message = data.toString();
     console.log(`[Slave] ${message}`);
@@ -277,7 +316,6 @@ ipcMain.on("start-slave", () => {
     console.error(`[Slave ERR] ${message}`);
 
     if (window) {
-      // UDP-specific error handling
       if (message.includes("EADDRINUSE")) {
         window.webContents.send(
           "log",

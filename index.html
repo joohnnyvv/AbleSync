@@ -5,9 +5,9 @@
     <title>AbleSync</title>
     <style>
       body {
-        font-family: sans-serif;
-        background: #1e1e1e;
-        color: #eee;
+        font-family: "Segoe UI", sans-serif;
+        background: #181818;
+        color: #f0f0f0;
         margin: 0;
         padding: 0;
         overflow-y: hidden;
@@ -16,77 +16,196 @@
       #container {
         display: flex;
         flex-direction: column;
-        gap: 0;
-        overflow-y: hidden;
         height: 100vh;
       }
+
       #controls {
         display: flex;
-        align-items: center;
-        justify-content: space-around;
         flex-wrap: wrap;
-        gap: 10px;
-        padding: 10px;
-        background: #2c2c2c;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        padding: 15px 20px;
+        background: #202020;
+        border-bottom: 1px solid #333;
       }
+
+      #startButtons {
+        display: flex;
+        gap: 12px;
+      }
+
       button {
-        padding: 5px 10px;
-        border-radius: 12px;
+        padding: 10px 18px;
+        border-radius: 8px;
         border: none;
+        background: linear-gradient(145deg, #2a2a2a, #333);
+        color: #f0f0f0;
+        font-size: 14px;
+        font-weight: 500;
         cursor: pointer;
+        transition: all 0.2s ease;
+        box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.4);
       }
-      pre {
-        margin: 0;
-        white-space: pre-wrap;
-        max-height: calc(100vh - 120px);
-        overflow-y: auto;
-        flex-grow: 1;
+
+      button:hover {
+        background: #0078d4;
+        color: #fff;
       }
-      .status-indicator {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
+
+      button:active {
+        transform: scale(0.96);
       }
-      .disconnected {
-        background-color: #f64c4c;
+
+      #stopButton {
+        background: #d43838;
       }
-      .almost-connected {
-        background-color: rgb(242, 242, 105);
+
+      #stopButton:hover {
+        background: #f24c4c;
       }
-      .connected {
-        background-color: rgb(74, 190, 74);
+
+      #thresholdControl {
+        display: none;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 15px;
+        background: #282828;
+        border-radius: 8px;
+        border: 1px solid #444;
+      }
+
+      #thresholdControl.visible {
+        display: flex;
+      }
+
+      #thresholdControl label {
+        font-size: 13px;
+        color: #ccc;
+      }
+
+      #thresholdInput {
+        width: 80px;
+        padding: 6px;
+        border: 1px solid #555;
+        border-radius: 6px;
+        background: #1f1f1f;
+        color: #fff;
+        font-size: 13px;
+      }
+
+      #thresholdInput:focus {
+        outline: none;
+        border-color: #0078d4;
+      }
+
+      #applyThresholdBtn {
+        background: #0078d4;
+        font-size: 13px;
+      }
+
+      #applyThresholdBtn:hover {
+        background: #106ebe;
       }
 
       .info-text {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        font-size: 12px;
+        font-size: 13px;
         color: #aaa;
-        text-align: center;
-        padding: 5px 10px;
-        background: #2c2c2c;
-        border-top: 1px solid #444;
+        padding: 10px 20px;
+        background: #202020;
+        border-top: 1px solid #333;
+      }
+
+      .status-indicator {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        box-shadow: 0 0 6px rgba(0, 0, 0, 0.6);
+      }
+
+      .disconnected {
+        background-color: #f64c4c;
+      }
+      .almost-connected {
+        background-color: #f2f269;
+      }
+      .connected {
+        background-color: #4abe4a;
+      }
+
+      pre {
+        flex-grow: 1;
+        margin: 0;
+        padding: 15px;
+        background: #121212;
+        font-size: 13px;
+        line-height: 1.4;
+        white-space: pre-wrap;
+        overflow-y: auto;
+        color: #dcdcdc;
       }
 
       .version-info {
-        font-size: 10px;
-        color: #666;
+        font-size: 11px;
+        color: #777;
         text-align: center;
-        padding: 3px;
-        background: #252525;
+        padding: 6px;
+        background: #1d1d1d;
         border-top: 1px solid #333;
+      }
+
+      pre::-webkit-scrollbar {
+        width: 8px;
+      }
+      pre::-webkit-scrollbar-track {
+        background: #1a1a1a;
+      }
+      pre::-webkit-scrollbar-thumb {
+        background: #444;
+        border-radius: 4px;
+      }
+      pre::-webkit-scrollbar-thumb:hover {
+        background: #666;
+      }
+
+      /* Responsywność */
+      @media (max-width: 600px) {
+        #controls {
+          flex-direction: column;
+        }
       }
     </style>
   </head>
   <body>
     <div id="container">
       <div id="controls">
-        <button onclick="start('master')">Uruchom jako master</button>
-        <button onclick="start('slave')">Uruchom jako slave</button>
-        <button onclick="stop()">Zatrzymaj serwer</button>
-        <button onclick="saveLogs()">Zapisz logi do pliku</button>
+        <div id="startButtons">
+          <button onclick="start('master')">Uruchom jako master</button>
+          <button onclick="start('slave')">Uruchom jako slave</button>
+        </div>
+        <button id="stopButton" onclick="stop()" style="display: none">
+          Zatrzymaj serwer
+        </button>
+        <button onclick="saveLogs()">Zapisz logi</button>
         <button onclick="clearLogs()">Wyczyść logi</button>
+
+        <div id="thresholdControl">
+          <label for="thresholdInput">Próg synchronizacji:</label>
+          <input
+            type="number"
+            id="thresholdInput"
+            min="0.001"
+            max="1"
+            step="0.001"
+            value="0.01"
+          />
+          <button id="applyThresholdBtn" onclick="applyThreshold()">
+            Zastosuj
+          </button>
+        </div>
       </div>
       <div class="info-text">
         UDP Multicast (224.0.1.100:8080) - Nie wymaga konfiguracji IP
@@ -94,15 +213,30 @@
       </div>
       <pre id="logOutput">Logi aplikacji pojawią się tutaj...</pre>
       <div id="versionInfo" class="version-info">Wersja: ładowanie...</div>
-      <p id="update-info" style="color: orange; font-weight: bold"></p>
     </div>
     <script>
       const output = document.getElementById("logOutput");
       const statusIndicator = document.getElementById("statusIndicator");
       const versionInfo = document.getElementById("versionInfo");
+      const thresholdControl = document.getElementById("thresholdControl");
+      const thresholdInput = document.getElementById("thresholdInput");
+      const startButtons = document.getElementById("startButtons");
+      const stopButton = document.getElementById("stopButton");
 
       let abletonConnected = false;
       let udpConnected = false;
+      let currentMode = null;
+
+      window.electronAPI
+        .getThreshold()
+        .then((threshold) => {
+          if (threshold !== null) {
+            thresholdInput.value = threshold;
+          }
+        })
+        .catch((err) => {
+          console.error("Błąd ładowania progu:", err);
+        });
 
       window.electronAPI
         .getAppVersion()
@@ -124,7 +258,29 @@
         }
       }
 
+      function updateThresholdVisibility() {
+        if (currentMode === "slave") {
+          thresholdControl.classList.add("visible");
+        } else {
+          thresholdControl.classList.remove("visible");
+        }
+      }
+
+      function updateButtonVisibility() {
+        if (currentMode) {
+          startButtons.style.display = "none";
+          stopButton.style.display = "inline-block";
+        } else {
+          startButtons.style.display = "flex";
+          stopButton.style.display = "none";
+        }
+      }
+
       function start(mode) {
+        currentMode = mode;
+        updateThresholdVisibility();
+        updateButtonVisibility();
+
         if (mode === "slave") {
           output.textContent += `\n[INFO] Uruchamianie slave z UDP Multicast...\n`;
           window.electronAPI.startSlave();
@@ -134,7 +290,26 @@
       }
 
       function stop() {
+        currentMode = null;
+        updateThresholdVisibility();
+        updateButtonVisibility();
         window.electronAPI.stopServer();
+      }
+
+      function applyThreshold() {
+        const threshold = parseFloat(thresholdInput.value);
+
+        if (isNaN(threshold) || threshold <= 0) {
+          output.textContent += `\n[WARN] Nieprawidłowa wartość progu: ${thresholdInput.value}\n`;
+          return;
+        }
+
+        window.electronAPI.saveThreshold(threshold);
+
+        if (currentMode === "slave") {
+          window.electronAPI.updateThreshold(threshold);
+          output.textContent += `\n[INFO] Próg synchronizacji ustawiony na: ${threshold}\n`;
+        }
       }
 
       function saveLogs() {
@@ -144,6 +319,12 @@
       function clearLogs() {
         output.textContent = "";
       }
+
+      thresholdInput.addEventListener("keypress", function (e) {
+        if (e.key === "Enter") {
+          applyThreshold();
+        }
+      });
 
       window.electronAPI.onLog((msg) => {
         output.textContent += msg;
@@ -171,6 +352,9 @@
         if (msg.includes("Serwer zatrzymany") || msg.includes("Zamykanie")) {
           abletonConnected = false;
           udpConnected = false;
+          currentMode = null;
+          updateThresholdVisibility();
+          updateButtonVisibility();
         }
         if (msg.includes("Utracono połączenie z masterem")) {
           udpConnected = false;
@@ -180,6 +364,8 @@
       });
 
       updateStatusIndicator();
+      updateThresholdVisibility();
+      updateButtonVisibility();
     </script>
   </body>
 </html>

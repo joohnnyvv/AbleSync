@@ -11,4 +11,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("websocket-status", (_, status) => callback(status)),
   saveLogs: (logContent) => ipcRenderer.send("save-logs", logContent),
   getAppVersion: () => ipcRenderer.invoke("get-app-version"),
+
+  saveThreshold: (threshold) => ipcRenderer.send("save-threshold", threshold),
+  getThreshold: () => ipcRenderer.invoke("get-threshold"),
+  updateThreshold: (threshold) =>
+    ipcRenderer.send("update-threshold", threshold),
 });
