@@ -234,6 +234,13 @@ function startServer(mode) {
 
   processRef.stderr.on("data", (data) => {
     const message = data.toString();
+    if (
+      message.includes("Message could not be assigned to any request") ||
+      message.includes('"event": "result"') ||
+      message.includes('"data": true')
+    ) {
+      return;
+    }
     if (window) window.webContents.send("log", "[ERR] " + message);
   });
 
@@ -314,6 +321,14 @@ ipcMain.on("start-slave", () => {
   processRef.stderr.on("data", (data) => {
     const message = data.toString();
     console.error(`[Slave ERR] ${message}`);
+
+    if (
+      message.includes("Message could not be assigned to any request") ||
+      message.includes('"event": "result"') ||
+      message.includes('"data": true')
+    ) {
+      return;
+    }
 
     if (window) {
       if (message.includes("EADDRINUSE")) {
